@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#2563eb">
+    <title>Bible Reader</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>📖 Bible Reader</h1>
+            <button id="fontBtn" type="button" aria-label="Adjust font size">Aa</button>
+        </header>
+        
+        <main>
+            <div id="bibleSelection">
+                <div id="languageFilter">
+                    <label for="languageSelect">Language:</label>
+                    <select id="languageSelect" aria-label="Filter by language">
+                        <option value="">All languages</option>
+                    </select>
+                </div>
+                
+                <div id="bibleList">
+                    <label for="bibleSelect">Choose Bible:</label>
+                    <select id="bibleSelect" aria-label="Select Bible version">
+                        <option value="">Select a Bible...</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div id="controls" class="hidden">
+                <select id="bookSelect" aria-label="Select book">
+                    <option value="">Select a book...</option>
+                </select>
+                
+                <div id="verseControls" class="hidden">
+                    <input 
+                        type="number" 
+                        id="startVerse" 
+                        placeholder="Start verse (optional)"
+                        min="1"
+                        aria-label="Start verse"
+                    >
+                    <input 
+                        type="number" 
+                        id="endVerse" 
+                        placeholder="End verse (optional)"
+                        min="1"
+                        aria-label="End verse"
+                    >
+                    <button id="readBtn" type="button">Read</button>
+                </div>
+            </div>
+            
+            <div id="content">
+                <div id="welcome">
+                    <p>Select a Bible to start reading</p>
+                </div>
+                
+                <div id="reading" class="hidden">
+                    <h2 id="chapterTitle"></h2>
+                    <div id="verses"></div>
+                </div>
+                
+                <div id="loading" class="hidden">
+                    <p>Loading Bible...</p>
+                </div>
+                
+                <div id="error" class="hidden">
+                    <p id="errorMessage"></p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="styles.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
