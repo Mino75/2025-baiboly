@@ -29,6 +29,76 @@ class BibleApp {
             '/zh_cuv.json'
         ];
         
+        // Book name mappings from abbreviations to full names
+        this.bookNameMappings = {
+            'gn': 'Genesis',
+            'ex': 'Exodus',
+            'lv': 'Leviticus',
+            'nm': 'Numbers',
+            'dt': 'Deuteronomy',
+            'jos': 'Joshua',
+            'jdg': 'Judges',
+            'ru': 'Ruth',
+            '1sm': '1 Samuel',
+            '2sm': '2 Samuel',
+            '1kg': '1 Kings',
+            '2kg': '2 Kings',
+            '1ch': '1 Chronicles',
+            '2ch': '2 Chronicles',
+            'ezr': 'Ezra',
+            'neh': 'Nehemiah',
+            'est': 'Esther',
+            'job': 'Job',
+            'ps': 'Psalms',
+            'pr': 'Proverbs',
+            'ec': 'Ecclesiastes',
+            'sg': 'Song of Solomon',
+            'is': 'Isaiah',
+            'jer': 'Jeremiah',
+            'lam': 'Lamentations',
+            'ezk': 'Ezekiel',
+            'dn': 'Daniel',
+            'hos': 'Hosea',
+            'jol': 'Joel',
+            'am': 'Amos',
+            'ob': 'Obadiah',
+            'jnh': 'Jonah',
+            'mic': 'Micah',
+            'na': 'Nahum',
+            'hab': 'Habakkuk',
+            'zep': 'Zephaniah',
+            'hag': 'Haggai',
+            'zec': 'Zechariah',
+            'mal': 'Malachi',
+            'mt': 'Matthew',
+            'mk': 'Mark',
+            'lk': 'Luke',
+            'jn': 'John',
+            'ac': 'Acts',
+            'ro': 'Romans',
+            '1co': '1 Corinthians',
+            '2co': '2 Corinthians',
+            'ga': 'Galatians',
+            'eph': 'Ephesians',
+            'php': 'Philippians',
+            'col': 'Colossians',
+            '1th': '1 Thessalonians',
+            '2th': '2 Thessalonians',
+            '1ti': '1 Timothy',
+            '2ti': '2 Timothy',
+            'tit': 'Titus',
+            'phm': 'Philemon',
+            'heb': 'Hebrews',
+            'jas': 'James',
+            '1pe': '1 Peter',
+            '2pe': '2 Peter',
+            '1jn': '1 John',
+            '2jn': '2 John',
+            '3jn': '3 John',
+            'jud': 'Jude',
+            're': 'Revelation'
+        };
+        
         this.elements = {
             languageSelect: document.getElementById('languageSelect'),
             bibleSelect: document.getElementById('bibleSelect'),
@@ -97,14 +167,6 @@ class BibleApp {
                 }
             });
         });
-
-        // Add debug button (remove in production)
-        if (window.location.hostname === 'localhost') {
-            const debugBtn = document.createElement('button');
-            debugBtn.textContent = 'Debug IndexedDB';
-            debugBtn.onclick = () => this.debugIndexedDB();
-            document.body.appendChild(debugBtn);
-        }
     }
 
     async initIndexedDB() {
@@ -118,13 +180,11 @@ class BibleApp {
             
             request.onsuccess = (event) => {
                 this.db = event.target.result;
-                console.log('IndexedDB initialized successfully');
                 resolve();
             };
             
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
-                console.log('Setting up IndexedDB schema');
                 
                 // Create object store for Bible data
                 if (!db.objectStoreNames.contains('bibles')) {
@@ -149,65 +209,50 @@ class BibleApp {
             const request = store.get(filename);
             
             request.onsuccess = () => {
-                const result = request.result;
-                if (result && result.data) {
-                    console.log(`Loaded ${filename} from IndexedDB cache`);
-                    resolve(result.data);
-                } else {
-                    resolve(null);
-                }
+                resolve(request.result?.data || null);
             };
             
             request.onerror = () => {
-                console.warn('IndexedDB read error:', request.error);
                 resolve(null);
             };
         });
     }
 
     async cacheBible(filename, data) {
-        if (!this.db) {
-            console.warn('IndexedDB not available, skipping cache');
-            return;
-        }
+        if (!this.db) return;
         
         try {
             const transaction = this.db.transaction(['bibles'], 'readwrite');
             const store = transaction.objectStore('bibles');
             
-            const cacheEntry = {
+            await store.put({
                 filename,
                 data,
-                cached_at: Date.now(),
-                size: JSON.stringify(data).length
-            };
-            
-            await new Promise((resolve, reject) => {
-                const request = store.put(cacheEntry);
-                request.onsuccess = () => {
-                    console.log(`Cached ${filename} in IndexedDB (${cacheEntry.size} bytes)`);
-                    resolve();
-                };
-                request.onerror = () => reject(request.error);
+                cached_at: Date.now()
             });
-            
         } catch (error) {
             console.warn('Failed to cache Bible data:', error);
         }
     }
 
-    // Fixed: Remove the non-existent API call
     async discoverBibles() {
         try {
-            // Use the working fallback method directly
-            this.availableBibles = await this.fallbackDiscoverBibles();
+            // Get list of available Bible JSON files from service worker
+            const response = await fetch('/api/bibles');
+            if (response.ok) {
+                this.availableBibles = await response.json();
+            } else {
+                // Fallback: try to discover files by common naming patterns
+                this.availableBibles = await this.fallbackDiscoverBibles();
+            }
             
             this.populateLanguageFilter();
             this.populateBibleSelect();
-            console.log('Discovered Bibles:', this.availableBibles);
         } catch (error) {
             console.error('Failed to discover Bibles:', error);
-            this.showError('Failed to load available Bibles. Please refresh the page.');
+            this.availableBibles = await this.fallbackDiscoverBibles();
+            this.populateLanguageFilter();
+            this.populateBibleSelect();
         }
     }
 
@@ -293,23 +338,50 @@ class BibleApp {
         this.showWelcome();
     }
 
+    // NEW METHOD: Transform raw Bible data to expected format
+    transformBibleData(rawData) {
+        const transformedData = {};
+        
+        rawData.forEach(book => {
+            // Get book name from abbreviation, fallback to original abbreviation
+            const bookName = this.bookNameMappings[book.abbrev] || book.abbrev;
+            
+            // Transform chapters
+            transformedData[bookName] = book.chapters.map((chapterVerses, chapterIndex) => {
+                return {
+                    chapter: chapterIndex + 1,
+                    verses: chapterVerses.map((verseText, verseIndex) => {
+                        return {
+                            verse: verseIndex + 1,
+                            text: verseText
+                        };
+                    })
+                };
+            });
+        });
+        
+        return transformedData;
+    }
+
     async loadSelectedBible(filename) {
         this.showLoading();
         
         try {
-            // Try to get from IndexedDB cache first
+            // Try to get from cache first
             let bibleData = await this.getBibleFromCache(filename);
             
             if (!bibleData) {
-                console.log(`Loading ${filename} from network`);
                 // Load from JSON file
                 const response = await fetch(filename);
                 if (!response.ok) {
                     throw new Error(`Failed to load ${filename} (${response.status})`);
                 }
-                bibleData = await response.json();
+                const rawData = await response.json();
                 
-                // Cache the loaded data in IndexedDB
+                // Transform the data to expected format
+                bibleData = this.transformBibleData(rawData);
+                
+                // Cache the transformed data
                 await this.cacheBible(filename, bibleData);
             }
             
@@ -503,26 +575,6 @@ class BibleApp {
         
         const sizeLabels = { small: 'Aa', medium: 'Aa', large: 'AA', xlarge: 'AA' };
         this.elements.fontBtn.textContent = sizeLabels[this.currentFontSize];
-    }
-
-    // Debug method to check IndexedDB contents
-    async debugIndexedDB() {
-        if (!this.db) {
-            console.log('IndexedDB not available');
-            return;
-        }
-        
-        const transaction = this.db.transaction(['bibles'], 'readonly');
-        const store = transaction.objectStore('bibles');
-        const request = store.getAll();
-        
-        request.onsuccess = () => {
-            const results = request.result;
-            console.log('IndexedDB Contents:', results);
-            results.forEach(entry => {
-                console.log(`- ${entry.filename}: ${entry.size} bytes, cached at ${new Date(entry.cached_at)}`);
-            });
-        };
     }
 }
 
