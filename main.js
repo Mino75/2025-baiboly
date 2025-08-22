@@ -56,7 +56,6 @@ class BibleApp {
         this.loadFontPreference();
         await this.initIndexedDB();
         await this.discoverBibles();
-    
     }
 
     setupEventListeners() {
@@ -98,6 +97,14 @@ class BibleApp {
                 }
             });
         });
+
+        // Add debug button (remove in production)
+        if (window.location.hostname === 'localhost') {
+            const debugBtn = document.createElement('button');
+            debugBtn.textContent = 'Debug IndexedDB';
+            debugBtn.onclick = () => this.debugIndexedDB();
+            document.body.appendChild(debugBtn);
+        }
     }
 
     async initIndexedDB() {
@@ -111,11 +118,13 @@ class BibleApp {
             
             request.onsuccess = (event) => {
                 this.db = event.target.result;
+                console.log('IndexedDB initialized successfully');
                 resolve();
             };
             
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
+                console.log('Setting up IndexedDB schema');
                 
                 // Create object store for Bible data
                 if (!db.objectStoreNames.contains('bibles')) {
@@ -140,48 +149,65 @@ class BibleApp {
             const request = store.get(filename);
             
             request.onsuccess = () => {
-                resolve(request.result?.data || null);
+                const result = request.result;
+                if (result && result.data) {
+                    console.log(`Loaded ${filename} from IndexedDB cache`);
+                    resolve(result.data);
+                } else {
+                    resolve(null);
+                }
             };
             
             request.onerror = () => {
+                console.warn('IndexedDB read error:', request.error);
                 resolve(null);
             };
         });
     }
 
     async cacheBible(filename, data) {
-        if (!this.db) return;
+        if (!this.db) {
+            console.warn('IndexedDB not available, skipping cache');
+            return;
+        }
         
         try {
             const transaction = this.db.transaction(['bibles'], 'readwrite');
             const store = transaction.objectStore('bibles');
             
-            await store.put({
+            const cacheEntry = {
                 filename,
                 data,
-                cached_at: Date.now()
+                cached_at: Date.now(),
+                size: JSON.stringify(data).length
+            };
+            
+            await new Promise((resolve, reject) => {
+                const request = store.put(cacheEntry);
+                request.onsuccess = () => {
+                    console.log(`Cached ${filename} in IndexedDB (${cacheEntry.size} bytes)`);
+                    resolve();
+                };
+                request.onerror = () => reject(request.error);
             });
+            
         } catch (error) {
             console.warn('Failed to cache Bible data:', error);
         }
     }
+
+    // Fixed: Remove the non-existent API call
+    async discoverBibles() {
         try {
-            // Get list of available Bible JSON files from service worker
-            const response = await fetch('/api/bibles');
-            if (response.ok) {
-                this.availableBibles = await response.json();
-            } else {
-                // Fallback: try to discover files by common naming patterns
-                this.availableBibles = await this.fallbackDiscoverBibles();
-            }
+            // Use the working fallback method directly
+            this.availableBibles = await this.fallbackDiscoverBibles();
             
             this.populateLanguageFilter();
             this.populateBibleSelect();
+            console.log('Discovered Bibles:', this.availableBibles);
         } catch (error) {
             console.error('Failed to discover Bibles:', error);
-            this.availableBibles = await this.fallbackDiscoverBibles();
-            this.populateLanguageFilter();
-            this.populateBibleSelect();
+            this.showError('Failed to load available Bibles. Please refresh the page.');
         }
     }
 
@@ -271,10 +297,11 @@ class BibleApp {
         this.showLoading();
         
         try {
-            // Try to get from cache first
+            // Try to get from IndexedDB cache first
             let bibleData = await this.getBibleFromCache(filename);
             
             if (!bibleData) {
+                console.log(`Loading ${filename} from network`);
                 // Load from JSON file
                 const response = await fetch(filename);
                 if (!response.ok) {
@@ -282,7 +309,7 @@ class BibleApp {
                 }
                 bibleData = await response.json();
                 
-                // Cache the loaded data
+                // Cache the loaded data in IndexedDB
                 await this.cacheBible(filename, bibleData);
             }
             
@@ -478,6 +505,26 @@ class BibleApp {
         this.elements.fontBtn.textContent = sizeLabels[this.currentFontSize];
     }
 
+    // Debug method to check IndexedDB contents
+    async debugIndexedDB() {
+        if (!this.db) {
+            console.log('IndexedDB not available');
+            return;
+        }
+        
+        const transaction = this.db.transaction(['bibles'], 'readonly');
+        const store = transaction.objectStore('bibles');
+        const request = store.getAll();
+        
+        request.onsuccess = () => {
+            const results = request.result;
+            console.log('IndexedDB Contents:', results);
+            results.forEach(entry => {
+                console.log(`- ${entry.filename}: ${entry.size} bytes, cached at ${new Date(entry.cached_at)}`);
+            });
+        };
+    }
+}
 
 // Initialize app when DOM is loaded
 if (document.readyState === 'loading') {
@@ -485,4 +532,3 @@ if (document.readyState === 'loading') {
 } else {
     new BibleApp();
 }
-
