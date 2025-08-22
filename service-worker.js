@@ -83,6 +83,10 @@ const ASSETS = [
   '/manifest.json',
   '/icon-512.png',
   '/icon-192.png',
+  '/es_rvr.json',
+  '/ru_synodal.json',
+  '/en_kjv.json',
+  '/zh_cuv.json',
   '/favicon.ico'
 ];
 
