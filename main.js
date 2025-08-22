@@ -56,7 +56,7 @@ class BibleApp {
         this.loadFontPreference();
         await this.initIndexedDB();
         await this.discoverBibles();
-        this.registerServiceWorker();
+    
     }
 
     setupEventListeners() {
@@ -478,16 +478,6 @@ class BibleApp {
         this.elements.fontBtn.textContent = sizeLabels[this.currentFontSize];
     }
 
-    async registerServiceWorker() {
-        if ('serviceWorker' in navigator) {
-            try {
-                await navigator.serviceWorker.register('sw.js');
-            } catch (error) {
-                console.warn('Service Worker registration failed:', error);
-            }
-        }
-    }
-}
 
 // Initialize app when DOM is loaded
 if (document.readyState === 'loading') {
@@ -495,3 +485,4 @@ if (document.readyState === 'loading') {
 } else {
     new BibleApp();
 }
+
