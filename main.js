@@ -1,8 +1,8 @@
-// Bible PWA Main JavaScript
+// Bible PWA Main JavaScript - Hierarchical Auto-reload Design
 
 class BibleApp {
     constructor() {
-        this.bibleData = null; // Store original structure
+        this.bibleData = null;
         this.availableBibles = [];
         this.currentFontSize = 'medium';
         this.fontSizes = ['small', 'medium', 'large', 'xlarge'];
@@ -10,41 +10,32 @@ class BibleApp {
         this.dbVersion = 1;
         this.db = null;
         
+        // Current selection state
+        this.currentSelection = {
+            bible: null,
+            book: null,
+            chapter: null,
+            startVerse: null,
+            endVerse: null
+        };
+        
         this.elements = {};
         this.init();
     }
 
     initElements() {
-        // Safely get all DOM elements with error checking
         const elementIds = [
-            'languageSelect',
-            'bibleSelect', 
-            'controls',
-            'bookSelect',
-            'verseControls',
-            'startVerse',
-            'endVerse', 
-            'readBtn',
-            'fontBtn',
-            'welcome',
-            'reading',
-            'loading',
-            'error',
-            'chapterTitle',
-            'verses',
-            'errorMessage'
+            'languageSelect', 'bibleSelect', 'controls', 'bookSelect',
+            'verseControls', 'startVerse', 'endVerse', 'fontBtn',
+            'welcome', 'reading', 'loading', 'error', 'chapterTitle',
+            'verses', 'errorMessage', 'prevChapterBtn', 'nextChapterBtn'
         ];
 
         elementIds.forEach(id => {
-            const element = document.getElementById(id);
-            if (!element) {
-                console.error(`Required element with id '${id}' not found in DOM`);
-            }
-            this.elements[id] = element;
+            this.elements[id] = document.getElementById(id);
         });
 
-        // Validate critical elements exist
-        const criticalElements = ['languageSelect', 'bibleSelect', 'bookSelect', 'readBtn'];
+        const criticalElements = ['languageSelect', 'bibleSelect', 'bookSelect'];
         const missingElements = criticalElements.filter(id => !this.elements[id]);
         
         if (missingElements.length > 0) {
@@ -57,10 +48,7 @@ class BibleApp {
     }
 
     async init() {
-        // Check if DOM elements were successfully initialized
-        if (!this.initElements()) {
-            return; // Exit if critical elements are missing
-        }
+        if (!this.initElements()) return;
 
         this.setupEventListeners();
         this.loadFontPreference();
@@ -69,60 +57,269 @@ class BibleApp {
     }
 
     setupEventListeners() {
-        // Safely add event listeners with null checks
+        // Bible selection - triggers full reload
+        if (this.elements.bibleSelect) {
+            this.elements.bibleSelect.addEventListener('change', (e) => {
+                this.handleSelectionChange('bible', e.target.value);
+            });
+        }
+
+        // Language filter
         if (this.elements.languageSelect) {
             this.elements.languageSelect.addEventListener('change', () => {
                 this.filterBiblesByLanguage();
             });
         }
 
-        if (this.elements.bibleSelect) {
-            this.elements.bibleSelect.addEventListener('change', async (e) => {
-                if (e.target.value) {
-                    await this.loadSelectedBible(e.target.value);
-                } else {
-                    this.hideControls();
-                    this.showWelcome();
-                }
-            });
-        }
-
+        // Book selection - triggers book reload
         if (this.elements.bookSelect) {
             this.elements.bookSelect.addEventListener('change', (e) => {
-                if (e.target.value) {
-                    this.populateChapterSelect(e.target.value);
-                    this.showVerseControls();
-                } else {
-                    this.hideChapterSelect();
-                    this.hideVerseControls();
-                }
+                this.handleSelectionChange('book', e.target.value);
             });
         }
 
-        if (this.elements.readBtn) {
-            this.elements.readBtn.addEventListener('click', () => {
-                this.displayVerses();
+        // Chapter selection - triggers chapter reload
+        if (this.elements.chapterSelect) {
+            this.elements.chapterSelect.addEventListener('change', (e) => {
+                this.handleSelectionChange('chapter', parseInt(e.target.value));
             });
         }
 
+        // Verse selection - triggers verse reload
+        if (this.elements.startVerse) {
+            this.elements.startVerse.addEventListener('change', (e) => {
+                this.handleSelectionChange('startVerse', parseInt(e.target.value) || null);
+            });
+        }
+
+        if (this.elements.endVerse) {
+            this.elements.endVerse.addEventListener('change', (e) => {
+                this.handleSelectionChange('endVerse', parseInt(e.target.value) || null);
+            });
+        }
+
+        // Navigation buttons
+        if (this.elements.prevChapterBtn) {
+            this.elements.prevChapterBtn.addEventListener('click', () => {
+                this.navigateChapter(-1);
+            });
+        }
+
+        if (this.elements.nextChapterBtn) {
+            this.elements.nextChapterBtn.addEventListener('click', () => {
+                this.navigateChapter(1);
+            });
+        }
+
+        // Font button
         if (this.elements.fontBtn) {
             this.elements.fontBtn.addEventListener('click', () => {
                 this.cycleFontSize();
             });
         }
 
-        // Allow Enter key to trigger reading
-        if (this.elements.startVerse && this.elements.endVerse) {
-            [this.elements.startVerse, this.elements.endVerse].forEach(input => {
+        // Enter key support for verse inputs
+        [this.elements.startVerse, this.elements.endVerse].forEach(input => {
+            if (input) {
                 input.addEventListener('keypress', (e) => {
                     if (e.key === 'Enter') {
-                        this.displayVerses();
+                        input.blur(); // Trigger change event
                     }
                 });
-            });
+            }
+        });
+    }
+
+    // Hierarchical selection handler with automatic reloading
+    async handleSelectionChange(level, value) {
+        console.log(`Selection change: ${level} = ${value}`);
+
+        // Update current selection and reset lower levels
+        switch (level) {
+            case 'bible':
+                this.currentSelection.bible = value;
+                this.currentSelection.book = null;
+                this.currentSelection.chapter = null;
+                this.currentSelection.startVerse = null;
+                this.currentSelection.endVerse = null;
+                
+                if (value) {
+                    await this.loadSelectedBible(value);
+                    // Auto-select first book
+                    if (this.bibleData && this.bibleData.length > 0) {
+                        const firstBook = this.bibleData[0].abbrev;
+                        this.elements.bookSelect.value = firstBook;
+                        await this.handleSelectionChange('book', firstBook);
+                    }
+                } else {
+                    this.resetToWelcome();
+                }
+                break;
+
+            case 'book':
+                this.currentSelection.book = value;
+                this.currentSelection.chapter = null;
+                this.currentSelection.startVerse = null;
+                this.currentSelection.endVerse = null;
+                
+                if (value) {
+                    this.populateChapterSelect(value);
+                    this.showControls();
+                    // Auto-select first chapter
+                    if (this.elements.chapterSelect) {
+                        this.elements.chapterSelect.value = '1';
+                        await this.handleSelectionChange('chapter', 1);
+                    }
+                } else {
+                    this.hideChapterControls();
+                }
+                break;
+
+            case 'chapter':
+                this.currentSelection.chapter = value;
+                this.currentSelection.startVerse = null;
+                this.currentSelection.endVerse = null;
+                
+                if (value) {
+                    this.updateVerseInputLimits();
+                    this.showVerseControls();
+                    // Auto-load all verses of the chapter
+                    this.clearVerseInputs();
+                    this.displayCurrentSelection();
+                } else {
+                    this.hideVerseControls();
+                }
+                break;
+
+            case 'startVerse':
+            case 'endVerse':
+                this.currentSelection[level] = value;
+                // Auto-reload with new verse selection
+                this.displayCurrentSelection();
+                break;
+
+            default:
+                console.warn(`Unknown selection level: ${level}`);
         }
     }
 
+    navigateChapter(direction) {
+        if (!this.currentSelection.book || !this.currentSelection.chapter) return;
+
+        const book = this.findBookByAbbrev(this.currentSelection.book);
+        if (!book) return;
+
+        const newChapter = this.currentSelection.chapter + direction;
+        
+        if (newChapter >= 1 && newChapter <= book.chapters.length) {
+            // Navigate within the same book
+            this.elements.chapterSelect.value = newChapter.toString();
+            this.handleSelectionChange('chapter', newChapter);
+        } else if (direction === 1 && newChapter > book.chapters.length) {
+            // Next book
+            this.navigateToNextBook();
+        } else if (direction === -1 && newChapter < 1) {
+            // Previous book
+            this.navigateToPreviousBook();
+        }
+    }
+
+    navigateToNextBook() {
+        if (!this.bibleData) return;
+        
+        const currentBookIndex = this.bibleData.findIndex(book => book.abbrev === this.currentSelection.book);
+        if (currentBookIndex < this.bibleData.length - 1) {
+            const nextBook = this.bibleData[currentBookIndex + 1];
+            this.elements.bookSelect.value = nextBook.abbrev;
+            this.handleSelectionChange('book', nextBook.abbrev);
+        }
+    }
+
+    navigateToPreviousBook() {
+        if (!this.bibleData) return;
+        
+        const currentBookIndex = this.bibleData.findIndex(book => book.abbrev === this.currentSelection.book);
+        if (currentBookIndex > 0) {
+            const prevBook = this.bibleData[currentBookIndex - 1];
+            this.elements.bookSelect.value = prevBook.abbrev;
+            this.handleSelectionChange('book', prevBook.abbrev);
+            
+            // Go to last chapter of previous book
+            setTimeout(() => {
+                if (this.elements.chapterSelect) {
+                    const lastChapter = prevBook.chapters.length;
+                    this.elements.chapterSelect.value = lastChapter.toString();
+                    this.handleSelectionChange('chapter', lastChapter);
+                }
+            }, 100);
+        }
+    }
+
+    displayCurrentSelection() {
+        const { book, chapter, startVerse, endVerse } = this.currentSelection;
+        
+        if (!book || !chapter) {
+            this.showWelcome();
+            return;
+        }
+
+        const bookData = this.findBookByAbbrev(book);
+        if (!bookData || !bookData.chapters || !bookData.chapters[chapter - 1]) {
+            this.showError('Chapter data not found.');
+            return;
+        }
+
+        const start = startVerse || 1;
+        const end = endVerse || bookData.chapters[chapter - 1].length;
+        
+        const chapterVerses = bookData.chapters[chapter - 1];
+        const verses = this.getVerseRange(chapterVerses, start, end);
+        
+        if (verses.length === 0) {
+            this.showError('No verses found for the specified range.');
+            return;
+        }
+
+        this.renderVerses(bookData.name, chapter, verses, start, end);
+        this.showReading();
+        this.updateNavigationButtons();
+    }
+
+    updateNavigationButtons() {
+        if (!this.elements.prevChapterBtn || !this.elements.nextChapterBtn) return;
+        if (!this.bibleData || !this.currentSelection.book || !this.currentSelection.chapter) return;
+
+        const currentBookIndex = this.bibleData.findIndex(book => book.abbrev === this.currentSelection.book);
+        const currentBook = this.bibleData[currentBookIndex];
+        const currentChapter = this.currentSelection.chapter;
+
+        // Enable/disable previous button
+        const hasPrevious = (currentChapter > 1) || (currentBookIndex > 0);
+        this.elements.prevChapterBtn.disabled = !hasPrevious;
+
+        // Enable/disable next button
+        const hasNext = (currentChapter < currentBook.chapters.length) || (currentBookIndex < this.bibleData.length - 1);
+        this.elements.nextChapterBtn.disabled = !hasNext;
+    }
+
+    clearVerseInputs() {
+        if (this.elements.startVerse) this.elements.startVerse.value = '';
+        if (this.elements.endVerse) this.elements.endVerse.value = '';
+    }
+
+    resetToWelcome() {
+        this.hideControls();
+        this.showWelcome();
+        this.currentSelection = {
+            bible: null,
+            book: null, 
+            chapter: null,
+            startVerse: null,
+            endVerse: null
+        };
+    }
+
+    // All the IndexedDB and discovery methods remain the same
     async initIndexedDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.dbVersion);
@@ -175,7 +372,7 @@ class BibleApp {
             
             await store.put({
                 filename,
-                data, // Store original structure
+                data,
                 cached_at: Date.now()
             });
         } catch (error) {
@@ -185,17 +382,14 @@ class BibleApp {
 
     async getBibleFilesFromServiceWorker() {
         try {
-            // Get cache info from service worker
             if ('serviceWorker' in navigator) {
                 const registration = await navigator.serviceWorker.ready;
                 if (registration.active) {
-                    // Create a message channel to communicate with service worker
                     const messageChannel = new MessageChannel();
                     
                     return new Promise((resolve) => {
                         messageChannel.port1.onmessage = (event) => {
                             const cacheInfo = event.data;
-                            // Filter Bible JSON files (contain underscore and end with .json)
                             const bibleFiles = cacheInfo.cachedUrls.filter(url => {
                                 const filename = url.split('/').pop();
                                 return filename.includes('_') && filename.endsWith('.json');
@@ -203,12 +397,10 @@ class BibleApp {
                             resolve(bibleFiles);
                         };
                         
-                        // Send message to service worker
                         registration.active.postMessage({
                             type: 'CACHE_INFO'
                         }, [messageChannel.port2]);
                         
-                        // Fallback timeout
                         setTimeout(() => resolve([]), 2000);
                     });
                 }
@@ -223,8 +415,6 @@ class BibleApp {
     parseBibleFilename(filepath) {
         const filename = filepath.split('/').pop();
         const nameWithoutExt = filename.replace('.json', '');
-        
-        // Split by underscore: first part = language, rest = version
         const parts = nameWithoutExt.split('_');
         
         if (parts.length >= 2) {
@@ -245,56 +435,35 @@ class BibleApp {
     async discoverBibles() {
         console.log('Discovering Bible files...');
         
-        // First try to get files from service worker cache
         let bibleFiles = await this.getBibleFilesFromServiceWorker();
         
         if (bibleFiles.length === 0) {
-            console.log('No Bible files found in service worker, trying fallback discovery...');
-            // Fallback: try common Bible files directly
-            const commonFiles = [
-                '/es_rvr.json',
-                '/ru_synodal.json', 
-                '/en_kjv.json',
-                '/zh_cuv.json'
-            ];
+            const commonFiles = ['/es_rvr.json', '/ru_synodal.json', '/en_kjv.json', '/zh_cuv.json'];
             
             for (const file of commonFiles) {
                 try {
                     const response = await fetch(file, { method: 'HEAD' });
-                    if (response.ok) {
-                        bibleFiles.push(file);
-                    }
-                } catch (e) {
-                    // File doesn't exist, continue
-                }
+                    if (response.ok) bibleFiles.push(file);
+                } catch (e) {}
             }
         }
         
-        console.log('Found Bible files:', bibleFiles);
-        
-        // Parse Bible files and create available Bibles list
         this.availableBibles = [];
         
         for (const file of bibleFiles) {
             const bibleInfo = this.parseBibleFilename(file);
             if (bibleInfo) {
-                // Verify the file is actually accessible
                 try {
                     const response = await fetch(bibleInfo.filename, { method: 'HEAD' });
                     if (response.ok) {
                         this.availableBibles.push(bibleInfo);
-                        console.log(`✓ Added: ${bibleInfo.name}`);
                     }
-                } catch (e) {
-                    console.warn(`✗ Could not access: ${bibleInfo.filename}`);
-                }
+                } catch (e) {}
             }
         }
         
-        console.log('Available Bibles:', this.availableBibles);
-        
         if (this.availableBibles.length === 0) {
-            this.showError('No Bible files found. Please check that Bible JSON files are available.');
+            this.showError('No Bible files found.');
             return;
         }
         
@@ -302,13 +471,35 @@ class BibleApp {
         this.populateBibleSelect();
     }
 
+    async loadSelectedBible(filename) {
+        this.showLoading();
+        
+        try {
+            let bibleData = await this.getBibleFromCache(filename);
+            
+            if (!bibleData) {
+                const response = await fetch(filename);
+                if (!response.ok) {
+                    throw new Error(`Failed to load ${filename} (${response.status})`);
+                }
+                bibleData = await response.json();
+                await this.cacheBible(filename, bibleData);
+            }
+            
+            this.bibleData = bibleData;
+            this.populateBookSelect();
+            this.hideLoading();
+            
+        } catch (error) {
+            console.error('Error loading Bible:', error);
+            this.showError(`Failed to load Bible: ${error.message}`);
+        }
+    }
+
     populateLanguageFilter() {
         if (!this.elements.languageSelect) return;
         
         const languages = [...new Set(this.availableBibles.map(bible => bible.language))];
-        
-        console.log('Languages found:', languages);
-        
         this.elements.languageSelect.innerHTML = '<option value="">All languages</option>';
         
         languages.forEach(lang => {
@@ -331,8 +522,6 @@ class BibleApp {
             ? this.availableBibles.filter(bible => bible.language === selectedLanguage)
             : this.availableBibles;
 
-        console.log('Filtered Bibles:', filteredBibles);
-
         this.elements.bibleSelect.innerHTML = '<option value="">Select a Bible...</option>';
         
         filteredBibles.forEach(bible => {
@@ -343,43 +532,7 @@ class BibleApp {
         });
 
         this.elements.bibleSelect.value = '';
-        this.hideControls();
-        this.showWelcome();
-    }
-
-    async loadSelectedBible(filename) {
-        this.showLoading();
-        
-        try {
-            console.log('Loading Bible:', filename);
-            
-            let bibleData = await this.getBibleFromCache(filename);
-            
-            if (!bibleData) {
-                console.log('Fetching from network:', filename);
-                const response = await fetch(filename);
-                if (!response.ok) {
-                    throw new Error(`Failed to load ${filename} (${response.status})`);
-                }
-                bibleData = await response.json();
-                console.log('Bible data loaded:', bibleData);
-                await this.cacheBible(filename, bibleData);
-            } else {
-                console.log('Bible data loaded from cache');
-            }
-            
-            this.bibleData = bibleData;
-            this.populateBookSelect();
-            this.showControls();
-            this.hideLoading();
-            
-            // Auto-select Genesis and display all verses
-            this.autoSelectDefaults();
-            
-        } catch (error) {
-            console.error('Error loading Bible:', error);
-            this.showError(`Failed to load Bible: ${error.message}`);
-        }
+        this.resetToWelcome();
     }
 
     findBookByAbbrev(abbreviation) {
@@ -390,15 +543,12 @@ class BibleApp {
     populateBookSelect() {
         if (!this.bibleData || !Array.isArray(this.bibleData) || !this.elements.bookSelect) return;
 
-        console.log('Populating book select with:', this.bibleData.length, 'books');
-
         this.elements.bookSelect.innerHTML = '<option value="">Select a book...</option>';
         
-        // Use book name from data structure
         this.bibleData.forEach(book => {
             const option = document.createElement('option');
             option.value = book.abbrev;
-            option.textContent = book.name; // Use name from data!
+            option.textContent = book.name;
             this.elements.bookSelect.appendChild(option);
         });
     }
@@ -407,12 +557,11 @@ class BibleApp {
         const book = this.findBookByAbbrev(bookAbbreviation);
         if (!book || !book.chapters) return;
 
-        // Create chapter select if it doesn't exist
         if (!this.elements.chapterSelect) {
             this.createChapterSelect();
         }
 
-        if (!this.elements.chapterSelect) return; // Failed to create
+        if (!this.elements.chapterSelect) return;
 
         this.elements.chapterSelect.innerHTML = '<option value="">Select chapter...</option>';
         
@@ -427,10 +576,7 @@ class BibleApp {
     }
 
     createChapterSelect() {
-        if (!this.elements.verseControls) {
-            console.error('Cannot create chapter select: verseControls element not found');
-            return;
-        }
+        if (!this.elements.verseControls) return;
 
         this.elements.chapterSelect = document.createElement('select');
         this.elements.chapterSelect.id = 'chapterSelect';
@@ -444,43 +590,21 @@ class BibleApp {
         this.elements.chapterSelect.style.background = 'white';
         this.elements.chapterSelect.classList.add('hidden');
         
-        // Insert before verse controls
         this.elements.verseControls.parentNode.insertBefore(
             this.elements.chapterSelect, 
             this.elements.verseControls
         );
         
         this.elements.chapterSelect.addEventListener('change', (e) => {
-            if (e.target.value) {
-                this.updateVerseInputLimits();
-            }
+            this.handleSelectionChange('chapter', parseInt(e.target.value) || null);
         });
     }
 
-    showChapterSelect() {
-        if (this.elements.chapterSelect) {
-            this.elements.chapterSelect.classList.remove('hidden');
-        }
-    }
-
-    hideChapterSelect() {
-        if (this.elements.chapterSelect) {
-            this.elements.chapterSelect.classList.add('hidden');
-        }
-    }
-
     updateVerseInputLimits() {
-        if (!this.elements.bookSelect || !this.elements.chapterSelect) return;
-        
-        const bookAbbreviation = this.elements.bookSelect.value;
-        const chapterNumber = parseInt(this.elements.chapterSelect.value);
-        
-        if (!bookAbbreviation || !chapterNumber) return;
-        
-        const book = this.findBookByAbbrev(bookAbbreviation);
-        if (!book || !book.chapters || !book.chapters[chapterNumber - 1]) return;
+        const book = this.findBookByAbbrev(this.currentSelection.book);
+        if (!book || !book.chapters || !book.chapters[this.currentSelection.chapter - 1]) return;
 
-        const totalVerses = book.chapters[chapterNumber - 1].length;
+        const totalVerses = book.chapters[this.currentSelection.chapter - 1].length;
         
         if (this.elements.startVerse && this.elements.endVerse) {
             this.elements.startVerse.max = totalVerses;
@@ -488,133 +612,6 @@ class BibleApp {
             this.elements.startVerse.placeholder = `Start verse (1-${totalVerses})`;
             this.elements.endVerse.placeholder = `End verse (1-${totalVerses})`;
         }
-    }
-
-    autoSelectDefaults() {
-        // Select Genesis (first book)
-        if (this.bibleData && this.bibleData.length > 0 && this.elements.bookSelect) {
-            const firstBook = this.bibleData[0];
-            this.elements.bookSelect.value = firstBook.abbrev;
-            
-            // Populate chapters for Genesis
-            this.populateChapterSelect(firstBook.abbrev);
-            this.showVerseControls();
-            
-            // Select Chapter 1
-            if (this.elements.chapterSelect) {
-                this.elements.chapterSelect.value = '1';
-                this.updateVerseInputLimits();
-            }
-            
-            // Auto-display Genesis 1 (all verses)
-            this.displayVerses();
-        }
-    }
-
-    showControls() {
-        if (this.elements.controls) {
-            this.elements.controls.classList.remove('hidden');
-        }
-    }
-
-    hideControls() {
-        if (this.elements.controls) {
-            this.elements.controls.classList.add('hidden');
-        }
-        this.hideChapterSelect();
-        this.hideVerseControls();
-    }
-
-    showVerseControls() {
-        if (this.elements.verseControls) {
-            this.elements.verseControls.classList.remove('hidden');
-        }
-    }
-
-    hideVerseControls() {
-        if (this.elements.verseControls) {
-            this.elements.verseControls.classList.add('hidden');
-        }
-    }
-
-    showWelcome() {
-        if (this.elements.welcome) this.elements.welcome.classList.remove('hidden');
-        if (this.elements.reading) this.elements.reading.classList.add('hidden');
-        if (this.elements.loading) this.elements.loading.classList.add('hidden');
-        if (this.elements.error) this.elements.error.classList.add('hidden');
-    }
-
-    showLoading() {
-        if (this.elements.welcome) this.elements.welcome.classList.add('hidden');
-        if (this.elements.reading) this.elements.reading.classList.add('hidden');
-        if (this.elements.loading) this.elements.loading.classList.remove('hidden');
-        if (this.elements.error) this.elements.error.classList.add('hidden');
-    }
-
-    hideLoading() {
-        if (this.elements.loading) {
-            this.elements.loading.classList.add('hidden');
-        }
-    }
-
-    showReading() {
-        if (this.elements.welcome) this.elements.welcome.classList.add('hidden');
-        if (this.elements.reading) this.elements.reading.classList.remove('hidden');
-        if (this.elements.loading) this.elements.loading.classList.add('hidden');
-        if (this.elements.error) this.elements.error.classList.add('hidden');
-    }
-
-    showError(message) {
-        if (this.elements.welcome) this.elements.welcome.classList.add('hidden');
-        if (this.elements.reading) this.elements.reading.classList.add('hidden');
-        if (this.elements.loading) this.elements.loading.classList.add('hidden');
-        if (this.elements.error) this.elements.error.classList.remove('hidden');
-        if (this.elements.errorMessage) this.elements.errorMessage.textContent = message;
-    }
-
-    displayVerses() {
-        if (!this.elements.bookSelect || !this.elements.chapterSelect) {
-            this.showError('Required form elements not available.');
-            return;
-        }
-
-        const bookAbbreviation = this.elements.bookSelect.value;
-        const chapterNumber = parseInt(this.elements.chapterSelect.value);
-        
-        if (!bookAbbreviation) {
-            this.showError('Please select a book first.');
-            return;
-        }
-
-        if (!chapterNumber) {
-            this.showError('Please select a chapter first.');
-            return;
-        }
-
-        const book = this.findBookByAbbrev(bookAbbreviation);
-        if (!book || !book.chapters || !book.chapters[chapterNumber - 1]) {
-            this.showError('Chapter data not found.');
-            return;
-        }
-
-        const startVerse = parseInt(this.elements.startVerse?.value) || 1;
-        let endVerse = parseInt(this.elements.endVerse?.value);
-        
-        // If no end verse specified, use end of chapter
-        if (!endVerse) {
-            endVerse = book.chapters[chapterNumber - 1].length;
-        }
-        
-        const chapterVerses = book.chapters[chapterNumber - 1];
-        const verses = this.getVerseRange(chapterVerses, startVerse, endVerse);
-        
-        if (verses.length === 0) {
-            this.showError('No verses found for the specified range.');
-            return;
-        }
-
-        this.renderVerses(book.name, chapterNumber, verses, startVerse, endVerse);
-        this.showReading();
     }
 
     getVerseRange(chapterVerses, start, end) {
@@ -629,7 +626,6 @@ class BibleApp {
     renderVerses(bookName, chapterNumber, verses, startVerse, endVerse) {
         if (!this.elements.chapterTitle || !this.elements.verses) return;
 
-        // Set title
         let title = `${bookName} ${chapterNumber}`;
         
         if (startVerse === endVerse) {
@@ -640,7 +636,6 @@ class BibleApp {
         
         this.elements.chapterTitle.textContent = title;
 
-        // Render verses
         this.elements.verses.innerHTML = '';
         this.elements.verses.className = `font-${this.currentFontSize}`;
         
@@ -652,6 +647,70 @@ class BibleApp {
                 <span class="verse-text">${verse.text}</span>
             `;
             this.elements.verses.appendChild(verseElement);
+        });
+    }
+
+    // UI state management
+    showControls() {
+        if (this.elements.controls) this.elements.controls.classList.remove('hidden');
+    }
+
+    hideControls() {
+        if (this.elements.controls) this.elements.controls.classList.add('hidden');
+        this.hideChapterControls();
+    }
+
+    showChapterSelect() {
+        if (this.elements.chapterSelect) this.elements.chapterSelect.classList.remove('hidden');
+    }
+
+    hideChapterSelect() {
+        if (this.elements.chapterSelect) this.elements.chapterSelect.classList.add('hidden');
+    }
+
+    hideChapterControls() {
+        this.hideChapterSelect();
+        this.hideVerseControls();
+    }
+
+    showVerseControls() {
+        if (this.elements.verseControls) this.elements.verseControls.classList.remove('hidden');
+    }
+
+    hideVerseControls() {
+        if (this.elements.verseControls) this.elements.verseControls.classList.add('hidden');
+    }
+
+    showWelcome() {
+        const states = { welcome: false, reading: true, loading: true, error: true };
+        this.setViewState(states);
+    }
+
+    showLoading() {
+        const states = { welcome: true, reading: true, loading: false, error: true };
+        this.setViewState(states);
+    }
+
+    hideLoading() {
+        if (this.elements.loading) this.elements.loading.classList.add('hidden');
+    }
+
+    showReading() {
+        const states = { welcome: true, reading: false, loading: true, error: true };
+        this.setViewState(states);
+    }
+
+    showError(message) {
+        const states = { welcome: true, reading: true, loading: true, error: false };
+        this.setViewState(states);
+        if (this.elements.errorMessage) this.elements.errorMessage.textContent = message;
+    }
+
+    setViewState(hiddenStates) {
+        Object.entries(hiddenStates).forEach(([state, hidden]) => {
+            if (this.elements[state]) {
+                this.elements[state].classList.toggle('hidden', hidden);
+            }
         });
     }
 
@@ -685,7 +744,7 @@ class BibleApp {
     }
 }
 
-// Initialize app when DOM is loaded
+// Initialize app
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => new BibleApp());
 } else {
