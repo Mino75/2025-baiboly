@@ -28,30 +28,58 @@ class BibleApp {
             '/zh_cuv.json'
         ];
         
-        this.elements = {
-            languageSelect: document.getElementById('languageSelect'),
-            bibleSelect: document.getElementById('bibleSelect'),
-            controls: document.getElementById('controls'),
-            bookSelect: document.getElementById('bookSelect'),
-            chapterSelect: document.getElementById('chapterSelect'),
-            verseControls: document.getElementById('verseControls'),
-            startVerse: document.getElementById('startVerse'),
-            endVerse: document.getElementById('endVerse'),
-            readBtn: document.getElementById('readBtn'),
-            fontBtn: document.getElementById('fontBtn'),
-            welcome: document.getElementById('welcome'),
-            reading: document.getElementById('reading'),
-            loading: document.getElementById('loading'),
-            error: document.getElementById('error'),
-            chapterTitle: document.getElementById('chapterTitle'),
-            verses: document.getElementById('verses'),
-            errorMessage: document.getElementById('errorMessage')
-        };
+        this.elements = {};
+        this.initElements();
+    }
+
+    initElements() {
+        // Safely get all DOM elements with error checking
+        const elementIds = [
+            'languageSelect',
+            'bibleSelect', 
+            'controls',
+            'bookSelect',
+            'verseControls',
+            'startVerse',
+            'endVerse', 
+            'readBtn',
+            'fontBtn',
+            'welcome',
+            'reading',
+            'loading',
+            'error',
+            'chapterTitle',
+            'verses',
+            'errorMessage'
+        ];
+
+        elementIds.forEach(id => {
+            const element = document.getElementById(id);
+            if (!element) {
+                console.error(`Required element with id '${id}' not found in DOM`);
+            }
+            this.elements[id] = element;
+        });
+
+        // Validate critical elements exist
+        const criticalElements = ['languageSelect', 'bibleSelect', 'bookSelect', 'readBtn'];
+        const missingElements = criticalElements.filter(id => !this.elements[id]);
         
-        this.init();
+        if (missingElements.length > 0) {
+            console.error('Critical DOM elements missing:', missingElements);
+            this.showError(`App initialization failed: Missing required elements: ${missingElements.join(', ')}`);
+            return false;
+        }
+
+        return true;
     }
 
     async init() {
+        // Check if DOM elements were successfully initialized
+        if (!this.initElements()) {
+            return; // Exit if critical elements are missing
+        }
+
         this.setupEventListeners();
         this.loadFontPreference();
         await this.initIndexedDB();
@@ -59,51 +87,60 @@ class BibleApp {
     }
 
     setupEventListeners() {
-        this.elements.languageSelect.addEventListener('change', () => {
-            this.filterBiblesByLanguage();
-        });
+        // Safely add event listeners with null checks
+        if (this.elements.languageSelect) {
+            this.elements.languageSelect.addEventListener('change', () => {
+                this.filterBiblesByLanguage();
+            });
+        }
 
-        this.elements.bibleSelect.addEventListener('change', async (e) => {
-            if (e.target.value) {
-                await this.loadSelectedBible(e.target.value);
-            } else {
-                this.hideControls();
-                this.showWelcome();
-            }
-        });
-
-        this.elements.bookSelect.addEventListener('change', (e) => {
-            if (e.target.value) {
-                this.populateChapterSelect(e.target.value);
-                this.showVerseControls();
-            } else {
-                this.hideChapterSelect();
-                this.hideVerseControls();
-            }
-        });
-
-        this.elements.chapterSelect.addEventListener('change', (e) => {
-            if (e.target.value) {
-                this.updateVerseInputLimits();
-            }
-        });
-
-        this.elements.readBtn.addEventListener('click', () => {
-            this.displayVerses();
-        });
-
-        this.elements.fontBtn.addEventListener('click', () => {
-            this.cycleFontSize();
-        });
-
-        // Allow Enter key to trigger reading
-        [this.elements.startVerse, this.elements.endVerse].forEach(input => {
-            input.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.displayVerses();
+        if (this.elements.bibleSelect) {
+            this.elements.bibleSelect.addEventListener('change', async (e) => {
+                if (e.target.value) {
+                    await this.loadSelectedBible(e.target.value);
+                } else {
+                    this.hideControls();
+                    this.showWelcome();
                 }
             });
-        });
+        }
+
+        if (this.elements.bookSelect) {
+            this.elements.bookSelect.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    this.populateChapterSelect(e.target.value);
+                    this.showVerseControls();
+                } else {
+                    this.hideChapterSelect();
+                    this.hideVerseControls();
+                }
+            });
+        }
+
+        // Chapter select will be created dynamically, so we'll add its listener later
+
+        if (this.elements.readBtn) {
+            this.elements.readBtn.addEventListener('click', () => {
+                this.displayVerses();
+            });
+        }
+
+        if (this.elements.fontBtn) {
+            this.elements.fontBtn.addEventListener('click', () => {
+                this.cycleFontSize();
+            });
+        }
+
+        // Allow Enter key to trigger reading
+        if (this.elements.startVerse && this.elements.endVerse) {
+            [this.elements.startVerse, this.elements.endVerse].forEach(input => {
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.displayVerses();
+                    }
+                });
+            });
+        }
     }
 
     async initIndexedDB() {
@@ -225,6 +262,8 @@ class BibleApp {
     }
 
     populateLanguageFilter() {
+        if (!this.elements.languageSelect) return;
+        
         const languages = [...new Set(this.availableBibles.map(bible => bible.language))];
         
         this.elements.languageSelect.innerHTML = '<option value="">All languages</option>';
@@ -242,6 +281,8 @@ class BibleApp {
     }
 
     filterBiblesByLanguage() {
+        if (!this.elements.languageSelect || !this.elements.bibleSelect) return;
+        
         const selectedLanguage = this.elements.languageSelect.value;
         const filteredBibles = selectedLanguage 
             ? this.availableBibles.filter(bible => bible.language === selectedLanguage)
@@ -295,7 +336,7 @@ class BibleApp {
     }
 
     populateBookSelect() {
-        if (!this.bibleData || !Array.isArray(this.bibleData)) return;
+        if (!this.bibleData || !Array.isArray(this.bibleData) || !this.elements.bookSelect) return;
 
         this.elements.bookSelect.innerHTML = '<option value="">Select a book...</option>';
         
@@ -317,6 +358,8 @@ class BibleApp {
             this.createChapterSelect();
         }
 
+        if (!this.elements.chapterSelect) return; // Failed to create
+
         this.elements.chapterSelect.innerHTML = '<option value="">Select chapter...</option>';
         
         book.chapters.forEach((chapter, index) => {
@@ -330,6 +373,11 @@ class BibleApp {
     }
 
     createChapterSelect() {
+        if (!this.elements.verseControls) {
+            console.error('Cannot create chapter select: verseControls element not found');
+            return;
+        }
+
         this.elements.chapterSelect = document.createElement('select');
         this.elements.chapterSelect.id = 'chapterSelect';
         this.elements.chapterSelect.setAttribute('aria-label', 'Select chapter');
@@ -342,8 +390,8 @@ class BibleApp {
         this.elements.chapterSelect.style.background = 'white';
         this.elements.chapterSelect.classList.add('hidden');
         
-        // Insert after book select
-        this.elements.bookSelect.parentNode.insertBefore(
+        // Insert before verse controls
+        this.elements.verseControls.parentNode.insertBefore(
             this.elements.chapterSelect, 
             this.elements.verseControls
         );
@@ -368,6 +416,8 @@ class BibleApp {
     }
 
     updateVerseInputLimits() {
+        if (!this.elements.bookSelect || !this.elements.chapterSelect) return;
+        
         const bookAbbreviation = this.elements.bookSelect.value;
         const chapterNumber = parseInt(this.elements.chapterSelect.value);
         
@@ -378,15 +428,17 @@ class BibleApp {
 
         const totalVerses = book.chapters[chapterNumber - 1].length;
         
-        this.elements.startVerse.max = totalVerses;
-        this.elements.endVerse.max = totalVerses;
-        this.elements.startVerse.placeholder = `Start verse (1-${totalVerses})`;
-        this.elements.endVerse.placeholder = `End verse (1-${totalVerses})`;
+        if (this.elements.startVerse && this.elements.endVerse) {
+            this.elements.startVerse.max = totalVerses;
+            this.elements.endVerse.max = totalVerses;
+            this.elements.startVerse.placeholder = `Start verse (1-${totalVerses})`;
+            this.elements.endVerse.placeholder = `End verse (1-${totalVerses})`;
+        }
     }
 
     autoSelectDefaults() {
         // Select Genesis (first book)
-        if (this.bibleData && this.bibleData.length > 0) {
+        if (this.bibleData && this.bibleData.length > 0 && this.elements.bookSelect) {
             const firstBook = this.bibleData[0];
             this.elements.bookSelect.value = firstBook.abbrev;
             
@@ -406,59 +458,74 @@ class BibleApp {
     }
 
     showControls() {
-        this.elements.controls.classList.remove('hidden');
+        if (this.elements.controls) {
+            this.elements.controls.classList.remove('hidden');
+        }
     }
 
     hideControls() {
-        this.elements.controls.classList.add('hidden');
+        if (this.elements.controls) {
+            this.elements.controls.classList.add('hidden');
+        }
         this.hideChapterSelect();
         this.hideVerseControls();
     }
 
     showVerseControls() {
-        this.elements.verseControls.classList.remove('hidden');
+        if (this.elements.verseControls) {
+            this.elements.verseControls.classList.remove('hidden');
+        }
     }
 
     hideVerseControls() {
-        this.elements.verseControls.classList.add('hidden');
+        if (this.elements.verseControls) {
+            this.elements.verseControls.classList.add('hidden');
+        }
     }
 
     showWelcome() {
-        this.elements.welcome.classList.remove('hidden');
-        this.elements.reading.classList.add('hidden');
-        this.elements.loading.classList.add('hidden');
-        this.elements.error.classList.add('hidden');
+        if (this.elements.welcome) this.elements.welcome.classList.remove('hidden');
+        if (this.elements.reading) this.elements.reading.classList.add('hidden');
+        if (this.elements.loading) this.elements.loading.classList.add('hidden');
+        if (this.elements.error) this.elements.error.classList.add('hidden');
     }
 
     showLoading() {
-        this.elements.welcome.classList.add('hidden');
-        this.elements.reading.classList.add('hidden');
-        this.elements.loading.classList.remove('hidden');
-        this.elements.error.classList.add('hidden');
+        if (this.elements.welcome) this.elements.welcome.classList.add('hidden');
+        if (this.elements.reading) this.elements.reading.classList.add('hidden');
+        if (this.elements.loading) this.elements.loading.classList.remove('hidden');
+        if (this.elements.error) this.elements.error.classList.add('hidden');
     }
 
     hideLoading() {
-        this.elements.loading.classList.add('hidden');
+        if (this.elements.loading) {
+            this.elements.loading.classList.add('hidden');
+        }
     }
 
     showReading() {
-        this.elements.welcome.classList.add('hidden');
-        this.elements.reading.classList.remove('hidden');
-        this.elements.loading.classList.add('hidden');
-        this.elements.error.classList.add('hidden');
+        if (this.elements.welcome) this.elements.welcome.classList.add('hidden');
+        if (this.elements.reading) this.elements.reading.classList.remove('hidden');
+        if (this.elements.loading) this.elements.loading.classList.add('hidden');
+        if (this.elements.error) this.elements.error.classList.add('hidden');
     }
 
     showError(message) {
-        this.elements.welcome.classList.add('hidden');
-        this.elements.reading.classList.add('hidden');
-        this.elements.loading.classList.add('hidden');
-        this.elements.error.classList.remove('hidden');
-        this.elements.errorMessage.textContent = message;
+        if (this.elements.welcome) this.elements.welcome.classList.add('hidden');
+        if (this.elements.reading) this.elements.reading.classList.add('hidden');
+        if (this.elements.loading) this.elements.loading.classList.add('hidden');
+        if (this.elements.error) this.elements.error.classList.remove('hidden');
+        if (this.elements.errorMessage) this.elements.errorMessage.textContent = message;
     }
 
     displayVerses() {
+        if (!this.elements.bookSelect || !this.elements.chapterSelect) {
+            this.showError('Required form elements not available.');
+            return;
+        }
+
         const bookAbbreviation = this.elements.bookSelect.value;
-        const chapterNumber = parseInt(this.elements.chapterSelect?.value);
+        const chapterNumber = parseInt(this.elements.chapterSelect.value);
         
         if (!bookAbbreviation) {
             this.showError('Please select a book first.');
@@ -476,8 +543,8 @@ class BibleApp {
             return;
         }
 
-        const startVerse = parseInt(this.elements.startVerse.value) || 1;
-        let endVerse = parseInt(this.elements.endVerse.value);
+        const startVerse = parseInt(this.elements.startVerse?.value) || 1;
+        let endVerse = parseInt(this.elements.endVerse?.value);
         
         // If no end verse specified, use end of chapter
         if (!endVerse) {
@@ -506,6 +573,8 @@ class BibleApp {
     }
 
     renderVerses(bookName, chapterNumber, verses, startVerse, endVerse) {
+        if (!this.elements.chapterTitle || !this.elements.verses) return;
+
         // Set title
         let title = `${bookName} ${chapterNumber}`;
         
@@ -537,14 +606,16 @@ class BibleApp {
         const nextIndex = (currentIndex + 1) % this.fontSizes.length;
         this.currentFontSize = this.fontSizes[nextIndex];
         
-        if (!this.elements.reading.classList.contains('hidden')) {
+        if (this.elements.reading && !this.elements.reading.classList.contains('hidden') && this.elements.verses) {
             this.elements.verses.className = `font-${this.currentFontSize}`;
         }
         
         localStorage.setItem('bibleFontSize', this.currentFontSize);
         
         const sizeLabels = { small: 'Aa', medium: 'Aa', large: 'AA', xlarge: 'AA' };
-        this.elements.fontBtn.textContent = sizeLabels[this.currentFontSize];
+        if (this.elements.fontBtn) {
+            this.elements.fontBtn.textContent = sizeLabels[this.currentFontSize];
+        }
     }
 
     loadFontPreference() {
@@ -554,7 +625,9 @@ class BibleApp {
         }
         
         const sizeLabels = { small: 'Aa', medium: 'Aa', large: 'AA', xlarge: 'AA' };
-        this.elements.fontBtn.textContent = sizeLabels[this.currentFontSize];
+        if (this.elements.fontBtn) {
+            this.elements.fontBtn.textContent = sizeLabels[this.currentFontSize];
+        }
     }
 }
 
