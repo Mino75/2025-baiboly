@@ -1,15 +1,5 @@
 // Bible PWA Main JavaScript
 
-// Bible files can be configured via environment variable
-if (!window.BIBLE_FILES) {
-    window.BIBLE_FILES = [
-        '/es_rvr.json',
-        '/ru_synodal.json', 
-        '/en_kjv.json',
-        '/zh_cuv.json'
-    ];
-}
-
 class BibleApp {
     constructor() {
         this.bibleData = null; // Store original structure
@@ -20,16 +10,8 @@ class BibleApp {
         this.dbVersion = 1;
         this.db = null;
         
-        // Default Bible files list
-        this.defaultBibleFiles = [
-            '/es_rvr.json',
-            '/ru_synodal.json', 
-            '/en_kjv.json',
-            '/zh_cuv.json'
-        ];
-        
         this.elements = {};
-        this.initElements();
+        this.init();
     }
 
     initElements() {
@@ -117,8 +99,6 @@ class BibleApp {
             });
         }
 
-        // Chapter select will be created dynamically, so we'll add its listener later
-
         if (this.elements.readBtn) {
             this.elements.readBtn.addEventListener('click', () => {
                 this.displayVerses();
@@ -203,68 +183,131 @@ class BibleApp {
         }
     }
 
-    async discoverBibles() {
+    async getBibleFilesFromServiceWorker() {
         try {
-            const response = await fetch('/api/bibles');
-            if (response.ok) {
-                this.availableBibles = await response.json();
-            } else {
-                this.availableBibles = await this.fallbackDiscoverBibles();
-            }
-            
-            this.populateLanguageFilter();
-            this.populateBibleSelect();
-        } catch (error) {
-            console.error('Failed to discover Bibles:', error);
-            this.availableBibles = await this.fallbackDiscoverBibles();
-            this.populateLanguageFilter();
-            this.populateBibleSelect();
-        }
-    }
-
-    getBibleFilesConfig() {
-        if (window.BIBLE_FILES && Array.isArray(window.BIBLE_FILES)) {
-            return window.BIBLE_FILES;
-        }
-        return this.defaultBibleFiles;
-    }
-
-    async fallbackDiscoverBibles() {
-        const bibleFiles = this.getBibleFilesConfig();
-        const availableBibles = [];
-        
-        for (const filepath of bibleFiles) {
-            try {
-                const response = await fetch(filepath, { method: 'HEAD' });
-                if (response.ok) {
-                    const filename = filepath.split('/').pop();
-                    const nameWithoutExt = filename.replace('.json', '');
-                    const parts = nameWithoutExt.split('_');
+            // Get cache info from service worker
+            if ('serviceWorker' in navigator) {
+                const registration = await navigator.serviceWorker.ready;
+                if (registration.active) {
+                    // Create a message channel to communicate with service worker
+                    const messageChannel = new MessageChannel();
                     
-                    if (parts.length >= 2) {
-                        const language = parts[0];
-                        const version = parts.slice(1).join('_').toUpperCase();
+                    return new Promise((resolve) => {
+                        messageChannel.port1.onmessage = (event) => {
+                            const cacheInfo = event.data;
+                            // Filter Bible JSON files (contain underscore and end with .json)
+                            const bibleFiles = cacheInfo.cachedUrls.filter(url => {
+                                const filename = url.split('/').pop();
+                                return filename.includes('_') && filename.endsWith('.json');
+                            });
+                            resolve(bibleFiles);
+                        };
                         
-                        availableBibles.push({
-                            filename: filepath,
-                            language,
-                            version,
-                            name: `${language.toUpperCase()} - ${version}`
-                        });
-                    }
+                        // Send message to service worker
+                        registration.active.postMessage({
+                            type: 'CACHE_INFO'
+                        }, [messageChannel.port2]);
+                        
+                        // Fallback timeout
+                        setTimeout(() => resolve([]), 2000);
+                    });
                 }
-            } catch (e) {
-                console.warn(`Bible file not found: ${filepath}`);
+            }
+        } catch (error) {
+            console.warn('Could not get Bible files from service worker:', error);
+        }
+        
+        return [];
+    }
+
+    parseBibleFilename(filepath) {
+        const filename = filepath.split('/').pop();
+        const nameWithoutExt = filename.replace('.json', '');
+        
+        // Split by underscore: first part = language, rest = version
+        const parts = nameWithoutExt.split('_');
+        
+        if (parts.length >= 2) {
+            const language = parts[0].toLowerCase();
+            const version = parts.slice(1).join('_').toUpperCase();
+            
+            return {
+                filename: filepath,
+                language,
+                version,
+                name: `${language.toUpperCase()} - ${version}`
+            };
+        }
+        
+        return null;
+    }
+
+    async discoverBibles() {
+        console.log('Discovering Bible files...');
+        
+        // First try to get files from service worker cache
+        let bibleFiles = await this.getBibleFilesFromServiceWorker();
+        
+        if (bibleFiles.length === 0) {
+            console.log('No Bible files found in service worker, trying fallback discovery...');
+            // Fallback: try common Bible files directly
+            const commonFiles = [
+                '/es_rvr.json',
+                '/ru_synodal.json', 
+                '/en_kjv.json',
+                '/zh_cuv.json'
+            ];
+            
+            for (const file of commonFiles) {
+                try {
+                    const response = await fetch(file, { method: 'HEAD' });
+                    if (response.ok) {
+                        bibleFiles.push(file);
+                    }
+                } catch (e) {
+                    // File doesn't exist, continue
+                }
             }
         }
-
-        return availableBibles;
+        
+        console.log('Found Bible files:', bibleFiles);
+        
+        // Parse Bible files and create available Bibles list
+        this.availableBibles = [];
+        
+        for (const file of bibleFiles) {
+            const bibleInfo = this.parseBibleFilename(file);
+            if (bibleInfo) {
+                // Verify the file is actually accessible
+                try {
+                    const response = await fetch(bibleInfo.filename, { method: 'HEAD' });
+                    if (response.ok) {
+                        this.availableBibles.push(bibleInfo);
+                        console.log(`✓ Added: ${bibleInfo.name}`);
+                    }
+                } catch (e) {
+                    console.warn(`✗ Could not access: ${bibleInfo.filename}`);
+                }
+            }
+        }
+        
+        console.log('Available Bibles:', this.availableBibles);
+        
+        if (this.availableBibles.length === 0) {
+            this.showError('No Bible files found. Please check that Bible JSON files are available.');
+            return;
+        }
+        
+        this.populateLanguageFilter();
+        this.populateBibleSelect();
     }
 
     populateLanguageFilter() {
         if (!this.elements.languageSelect) return;
         
         const languages = [...new Set(this.availableBibles.map(bible => bible.language))];
+        
+        console.log('Languages found:', languages);
         
         this.elements.languageSelect.innerHTML = '<option value="">All languages</option>';
         
@@ -288,6 +331,8 @@ class BibleApp {
             ? this.availableBibles.filter(bible => bible.language === selectedLanguage)
             : this.availableBibles;
 
+        console.log('Filtered Bibles:', filteredBibles);
+
         this.elements.bibleSelect.innerHTML = '<option value="">Select a Bible...</option>';
         
         filteredBibles.forEach(bible => {
@@ -306,15 +351,21 @@ class BibleApp {
         this.showLoading();
         
         try {
+            console.log('Loading Bible:', filename);
+            
             let bibleData = await this.getBibleFromCache(filename);
             
             if (!bibleData) {
+                console.log('Fetching from network:', filename);
                 const response = await fetch(filename);
                 if (!response.ok) {
                     throw new Error(`Failed to load ${filename} (${response.status})`);
                 }
                 bibleData = await response.json();
+                console.log('Bible data loaded:', bibleData);
                 await this.cacheBible(filename, bibleData);
+            } else {
+                console.log('Bible data loaded from cache');
             }
             
             this.bibleData = bibleData;
@@ -326,6 +377,7 @@ class BibleApp {
             this.autoSelectDefaults();
             
         } catch (error) {
+            console.error('Error loading Bible:', error);
             this.showError(`Failed to load Bible: ${error.message}`);
         }
     }
@@ -337,6 +389,8 @@ class BibleApp {
 
     populateBookSelect() {
         if (!this.bibleData || !Array.isArray(this.bibleData) || !this.elements.bookSelect) return;
+
+        console.log('Populating book select with:', this.bibleData.length, 'books');
 
         this.elements.bookSelect.innerHTML = '<option value="">Select a book...</option>';
         
