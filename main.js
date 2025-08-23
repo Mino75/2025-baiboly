@@ -13,7 +13,7 @@ if (!window.BIBLE_FILES) {
 
 class BibleApp {
     constructor() {
-        this.bibleData = null;
+        this.bibleData = null; // Store original structure
         this.availableBibles = [];
         this.currentFontSize = 'medium';
         this.fontSizes = ['small', 'medium', 'large', 'xlarge'];
@@ -29,7 +29,7 @@ class BibleApp {
             '/zh_cuv.json'
         ];
         
-        // Book name mappings from abbreviations to full names
+        // Book name mappings from abbreviations to full names - DISPLAY ONLY
         this.bookNameMappings = {
             'gn': 'Genesis',
             'ex': 'Exodus',
@@ -227,7 +227,7 @@ class BibleApp {
             
             await store.put({
                 filename,
-                data,
+                data, // Store original structure as-is
                 cached_at: Date.now()
             });
         } catch (error) {
@@ -338,31 +338,6 @@ class BibleApp {
         this.showWelcome();
     }
 
-    // NEW METHOD: Transform raw Bible data to expected format
-    transformBibleData(rawData) {
-        const transformedData = {};
-        
-        rawData.forEach(book => {
-            // Get book name from abbreviation, fallback to original abbreviation
-            const bookName = this.bookNameMappings[book.abbrev] || book.abbrev;
-            
-            // Transform chapters
-            transformedData[bookName] = book.chapters.map((chapterVerses, chapterIndex) => {
-                return {
-                    chapter: chapterIndex + 1,
-                    verses: chapterVerses.map((verseText, verseIndex) => {
-                        return {
-                            verse: verseIndex + 1,
-                            text: verseText
-                        };
-                    })
-                };
-            });
-        });
-        
-        return transformedData;
-    }
-
     async loadSelectedBible(filename) {
         this.showLoading();
         
@@ -376,15 +351,13 @@ class BibleApp {
                 if (!response.ok) {
                     throw new Error(`Failed to load ${filename} (${response.status})`);
                 }
-                const rawData = await response.json();
+                bibleData = await response.json();
                 
-                // Transform the data to expected format
-                bibleData = this.transformBibleData(rawData);
-                
-                // Cache the transformed data
+                // Cache the ORIGINAL data structure (no transformation)
                 await this.cacheBible(filename, bibleData);
             }
             
+            // Store original data structure
             this.bibleData = bibleData;
             this.populateBookSelect();
             this.showControls();
@@ -394,24 +367,36 @@ class BibleApp {
         }
     }
 
+    // Helper method to get display name for a book abbreviation
+    getBookDisplayName(abbreviation) {
+        return this.bookNameMappings[abbreviation] || abbreviation;
+    }
+
+    // Helper method to find book by abbreviation (for internal use)
+    findBookByAbbrev(abbreviation) {
+        if (!this.bibleData || !Array.isArray(this.bibleData)) return null;
+        return this.bibleData.find(book => book.abbrev === abbreviation);
+    }
+
     populateBookSelect() {
-        if (!this.bibleData) return;
+        if (!this.bibleData || !Array.isArray(this.bibleData)) return;
 
         this.elements.bookSelect.innerHTML = '<option value="">Select a book...</option>';
         
-        Object.keys(this.bibleData).forEach(book => {
+        // Use original abbreviations as values, but display mapped names
+        this.bibleData.forEach(book => {
             const option = document.createElement('option');
-            option.value = book;
-            option.textContent = book;
+            option.value = book.abbrev; // Store original abbreviation
+            option.textContent = this.getBookDisplayName(book.abbrev); // Display mapped name
             this.elements.bookSelect.appendChild(option);
         });
     }
 
-    updateVerseInputLimits(bookName) {
-        const book = this.bibleData[bookName];
-        if (!book || !book[0]) return;
+    updateVerseInputLimits(bookAbbreviation) {
+        const book = this.findBookByAbbrev(bookAbbreviation);
+        if (!book || !book.chapters || !book.chapters[0]) return;
 
-        const totalVerses = book[0].verses.length;
+        const totalVerses = book.chapters[0].length; // First chapter verses count
         
         this.elements.startVerse.max = totalVerses;
         this.elements.endVerse.max = totalVerses;
@@ -470,14 +455,14 @@ class BibleApp {
     }
 
     displayVerses() {
-        const bookName = this.elements.bookSelect.value;
-        if (!bookName) {
+        const bookAbbreviation = this.elements.bookSelect.value;
+        if (!bookAbbreviation) {
             this.showError('Please select a book first.');
             return;
         }
 
-        const book = this.bibleData[bookName];
-        if (!book || !book[0]) {
+        const book = this.findBookByAbbrev(bookAbbreviation);
+        if (!book || !book.chapters || !book.chapters[0]) {
             this.showError('Book data not found.');
             return;
         }
@@ -485,18 +470,26 @@ class BibleApp {
         const startVerse = parseInt(this.elements.startVerse.value) || null;
         const endVerse = parseInt(this.elements.endVerse.value) || null;
         
-        const verses = this.getVerseRange(book[0].verses, startVerse, endVerse);
+        // Get verses from first chapter (assuming single chapter for now)
+        const chapterVerses = book.chapters[0];
+        const verses = this.getVerseRange(chapterVerses, startVerse, endVerse);
         
         if (verses.length === 0) {
             this.showError('No verses found for the specified range.');
             return;
         }
 
-        this.renderVerses(bookName, verses, startVerse, endVerse);
+        this.renderVerses(bookAbbreviation, verses, startVerse, endVerse);
         this.showReading();
     }
 
-    getVerseRange(allVerses, start, end) {
+    getVerseRange(chapterVerses, start, end) {
+        // Convert verse text array to verse objects with numbers
+        const allVerses = chapterVerses.map((text, index) => ({
+            verse: index + 1,
+            text: text
+        }));
+
         // No start, no end: show all
         if (!start && !end) {
             return allVerses;
@@ -516,13 +509,12 @@ class BibleApp {
         return allVerses.filter(v => v.verse >= start && v.verse <= end);
     }
 
-    renderVerses(bookName, verses, startVerse, endVerse) {
-        // Set title
-        let title = `${bookName}`;
-        const book = this.bibleData[bookName][0];
-        if (book && book.chapter) {
-            title += ` ${book.chapter}`;
-        }
+    renderVerses(bookAbbreviation, verses, startVerse, endVerse) {
+        // Set title using display name
+        let title = this.getBookDisplayName(bookAbbreviation);
+        
+        // For now, assume chapter 1 (you can extend this for multi-chapter support)
+        title += ' 1';
         
         if (startVerse && endVerse && startVerse !== endVerse) {
             title += `:${startVerse}-${endVerse}`;
