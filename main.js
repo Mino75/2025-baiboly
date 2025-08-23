@@ -1,7 +1,6 @@
 // Bible PWA Main JavaScript
 
 // Bible files can be configured via environment variable
-// This will be overridden by Docker environment variable if set
 if (!window.BIBLE_FILES) {
     window.BIBLE_FILES = [
         '/es_rvr.json',
@@ -21,7 +20,7 @@ class BibleApp {
         this.dbVersion = 1;
         this.db = null;
         
-        // Default Bible files list - can be overridden by environment variable
+        // Default Bible files list
         this.defaultBibleFiles = [
             '/es_rvr.json',
             '/ru_synodal.json', 
@@ -29,81 +28,12 @@ class BibleApp {
             '/zh_cuv.json'
         ];
         
-        // Book name mappings from abbreviations to full names - DISPLAY ONLY
-        this.bookNameMappings = {
-            'gn': 'Genesis',
-            'ex': 'Exodus',
-            'lv': 'Leviticus',
-            'nm': 'Numbers',
-            'dt': 'Deuteronomy',
-            'jos': 'Joshua',
-            'jdg': 'Judges',
-            'ru': 'Ruth',
-            '1sm': '1 Samuel',
-            '2sm': '2 Samuel',
-            '1kg': '1 Kings',
-            '2kg': '2 Kings',
-            '1ch': '1 Chronicles',
-            '2ch': '2 Chronicles',
-            'ezr': 'Ezra',
-            'neh': 'Nehemiah',
-            'est': 'Esther',
-            'job': 'Job',
-            'ps': 'Psalms',
-            'pr': 'Proverbs',
-            'ec': 'Ecclesiastes',
-            'sg': 'Song of Solomon',
-            'is': 'Isaiah',
-            'jer': 'Jeremiah',
-            'lam': 'Lamentations',
-            'ezk': 'Ezekiel',
-            'dn': 'Daniel',
-            'hos': 'Hosea',
-            'jol': 'Joel',
-            'am': 'Amos',
-            'ob': 'Obadiah',
-            'jnh': 'Jonah',
-            'mic': 'Micah',
-            'na': 'Nahum',
-            'hab': 'Habakkuk',
-            'zep': 'Zephaniah',
-            'hag': 'Haggai',
-            'zec': 'Zechariah',
-            'mal': 'Malachi',
-            'mt': 'Matthew',
-            'mk': 'Mark',
-            'lk': 'Luke',
-            'jn': 'John',
-            'ac': 'Acts',
-            'ro': 'Romans',
-            '1co': '1 Corinthians',
-            '2co': '2 Corinthians',
-            'ga': 'Galatians',
-            'eph': 'Ephesians',
-            'php': 'Philippians',
-            'col': 'Colossians',
-            '1th': '1 Thessalonians',
-            '2th': '2 Thessalonians',
-            '1ti': '1 Timothy',
-            '2ti': '2 Timothy',
-            'tit': 'Titus',
-            'phm': 'Philemon',
-            'heb': 'Hebrews',
-            'jas': 'James',
-            '1pe': '1 Peter',
-            '2pe': '2 Peter',
-            '1jn': '1 John',
-            '2jn': '2 John',
-            '3jn': '3 John',
-            'jud': 'Jude',
-            're': 'Revelation'
-        };
-        
         this.elements = {
             languageSelect: document.getElementById('languageSelect'),
             bibleSelect: document.getElementById('bibleSelect'),
             controls: document.getElementById('controls'),
             bookSelect: document.getElementById('bookSelect'),
+            chapterSelect: document.getElementById('chapterSelect'),
             verseControls: document.getElementById('verseControls'),
             startVerse: document.getElementById('startVerse'),
             endVerse: document.getElementById('endVerse'),
@@ -144,10 +74,17 @@ class BibleApp {
 
         this.elements.bookSelect.addEventListener('change', (e) => {
             if (e.target.value) {
+                this.populateChapterSelect(e.target.value);
                 this.showVerseControls();
-                this.updateVerseInputLimits(e.target.value);
             } else {
+                this.hideChapterSelect();
                 this.hideVerseControls();
+            }
+        });
+
+        this.elements.chapterSelect.addEventListener('change', (e) => {
+            if (e.target.value) {
+                this.updateVerseInputLimits();
             }
         });
 
@@ -186,15 +123,9 @@ class BibleApp {
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
                 
-                // Create object store for Bible data
                 if (!db.objectStoreNames.contains('bibles')) {
                     const store = db.createObjectStore('bibles', { keyPath: 'filename' });
                     store.createIndex('language', 'language', { unique: false });
-                }
-                
-                // Create object store for Bible index (books list)
-                if (!db.objectStoreNames.contains('bible_index')) {
-                    db.createObjectStore('bible_index', { keyPath: 'filename' });
                 }
             };
         });
@@ -227,7 +158,7 @@ class BibleApp {
             
             await store.put({
                 filename,
-                data, // Store original structure as-is
+                data, // Store original structure
                 cached_at: Date.now()
             });
         } catch (error) {
@@ -237,12 +168,10 @@ class BibleApp {
 
     async discoverBibles() {
         try {
-            // Get list of available Bible JSON files from service worker
             const response = await fetch('/api/bibles');
             if (response.ok) {
                 this.availableBibles = await response.json();
             } else {
-                // Fallback: try to discover files by common naming patterns
                 this.availableBibles = await this.fallbackDiscoverBibles();
             }
             
@@ -257,12 +186,9 @@ class BibleApp {
     }
 
     getBibleFilesConfig() {
-        // Get Bible files list from environment variable or use default
         if (window.BIBLE_FILES && Array.isArray(window.BIBLE_FILES)) {
             return window.BIBLE_FILES;
         }
-        
-        // Fallback to default list
         return this.defaultBibleFiles;
     }
 
@@ -274,12 +200,10 @@ class BibleApp {
             try {
                 const response = await fetch(filepath, { method: 'HEAD' });
                 if (response.ok) {
-                    // Extract filename without path and extension
                     const filename = filepath.split('/').pop();
                     const nameWithoutExt = filename.replace('.json', '');
-                    
-                    // Parse language and version from filename
                     const parts = nameWithoutExt.split('_');
+                    
                     if (parts.length >= 2) {
                         const language = parts[0];
                         const version = parts.slice(1).join('_').toUpperCase();
@@ -332,7 +256,6 @@ class BibleApp {
             this.elements.bibleSelect.appendChild(option);
         });
 
-        // Reset controls when filter changes
         this.elements.bibleSelect.value = '';
         this.hideControls();
         this.showWelcome();
@@ -342,37 +265,30 @@ class BibleApp {
         this.showLoading();
         
         try {
-            // Try to get from cache first
             let bibleData = await this.getBibleFromCache(filename);
             
             if (!bibleData) {
-                // Load from JSON file
                 const response = await fetch(filename);
                 if (!response.ok) {
                     throw new Error(`Failed to load ${filename} (${response.status})`);
                 }
                 bibleData = await response.json();
-                
-                // Cache the ORIGINAL data structure (no transformation)
                 await this.cacheBible(filename, bibleData);
             }
             
-            // Store original data structure
             this.bibleData = bibleData;
             this.populateBookSelect();
             this.showControls();
             this.hideLoading();
+            
+            // Auto-select Genesis and display all verses
+            this.autoSelectDefaults();
+            
         } catch (error) {
             this.showError(`Failed to load Bible: ${error.message}`);
         }
     }
 
-    // Helper method to get display name for a book abbreviation
-    getBookDisplayName(abbreviation) {
-        return this.bookNameMappings[abbreviation] || abbreviation;
-    }
-
-    // Helper method to find book by abbreviation (for internal use)
     findBookByAbbrev(abbreviation) {
         if (!this.bibleData || !Array.isArray(this.bibleData)) return null;
         return this.bibleData.find(book => book.abbrev === abbreviation);
@@ -383,25 +299,110 @@ class BibleApp {
 
         this.elements.bookSelect.innerHTML = '<option value="">Select a book...</option>';
         
-        // Use original abbreviations as values, but display mapped names
+        // Use book name from data structure
         this.bibleData.forEach(book => {
             const option = document.createElement('option');
-            option.value = book.abbrev; // Store original abbreviation
-            option.textContent = this.getBookDisplayName(book.abbrev); // Display mapped name
+            option.value = book.abbrev;
+            option.textContent = book.name; // Use name from data!
             this.elements.bookSelect.appendChild(option);
         });
     }
 
-    updateVerseInputLimits(bookAbbreviation) {
+    populateChapterSelect(bookAbbreviation) {
         const book = this.findBookByAbbrev(bookAbbreviation);
-        if (!book || !book.chapters || !book.chapters[0]) return;
+        if (!book || !book.chapters) return;
 
-        const totalVerses = book.chapters[0].length; // First chapter verses count
+        // Create chapter select if it doesn't exist
+        if (!this.elements.chapterSelect) {
+            this.createChapterSelect();
+        }
+
+        this.elements.chapterSelect.innerHTML = '<option value="">Select chapter...</option>';
+        
+        book.chapters.forEach((chapter, index) => {
+            const option = document.createElement('option');
+            option.value = index + 1;
+            option.textContent = `Chapter ${index + 1}`;
+            this.elements.chapterSelect.appendChild(option);
+        });
+
+        this.showChapterSelect();
+    }
+
+    createChapterSelect() {
+        this.elements.chapterSelect = document.createElement('select');
+        this.elements.chapterSelect.id = 'chapterSelect';
+        this.elements.chapterSelect.setAttribute('aria-label', 'Select chapter');
+        this.elements.chapterSelect.style.marginBottom = '1rem';
+        this.elements.chapterSelect.style.width = '100%';
+        this.elements.chapterSelect.style.padding = '0.75rem';
+        this.elements.chapterSelect.style.border = '1px solid #d1d5db';
+        this.elements.chapterSelect.style.borderRadius = '0.375rem';
+        this.elements.chapterSelect.style.fontSize = '1rem';
+        this.elements.chapterSelect.style.background = 'white';
+        this.elements.chapterSelect.classList.add('hidden');
+        
+        // Insert after book select
+        this.elements.bookSelect.parentNode.insertBefore(
+            this.elements.chapterSelect, 
+            this.elements.verseControls
+        );
+        
+        this.elements.chapterSelect.addEventListener('change', (e) => {
+            if (e.target.value) {
+                this.updateVerseInputLimits();
+            }
+        });
+    }
+
+    showChapterSelect() {
+        if (this.elements.chapterSelect) {
+            this.elements.chapterSelect.classList.remove('hidden');
+        }
+    }
+
+    hideChapterSelect() {
+        if (this.elements.chapterSelect) {
+            this.elements.chapterSelect.classList.add('hidden');
+        }
+    }
+
+    updateVerseInputLimits() {
+        const bookAbbreviation = this.elements.bookSelect.value;
+        const chapterNumber = parseInt(this.elements.chapterSelect.value);
+        
+        if (!bookAbbreviation || !chapterNumber) return;
+        
+        const book = this.findBookByAbbrev(bookAbbreviation);
+        if (!book || !book.chapters || !book.chapters[chapterNumber - 1]) return;
+
+        const totalVerses = book.chapters[chapterNumber - 1].length;
         
         this.elements.startVerse.max = totalVerses;
         this.elements.endVerse.max = totalVerses;
         this.elements.startVerse.placeholder = `Start verse (1-${totalVerses})`;
         this.elements.endVerse.placeholder = `End verse (1-${totalVerses})`;
+    }
+
+    autoSelectDefaults() {
+        // Select Genesis (first book)
+        if (this.bibleData && this.bibleData.length > 0) {
+            const firstBook = this.bibleData[0];
+            this.elements.bookSelect.value = firstBook.abbrev;
+            
+            // Populate chapters for Genesis
+            this.populateChapterSelect(firstBook.abbrev);
+            this.showVerseControls();
+            
+            // Select Chapter 1
+            if (this.elements.chapterSelect) {
+                this.elements.chapterSelect.value = '1';
+                this.updateVerseInputLimits();
+            }
+            
+            // Auto-display Genesis 1 (all verses)
+            this.displayVerses();
+        }
     }
 
     showControls() {
@@ -410,6 +411,7 @@ class BibleApp {
 
     hideControls() {
         this.elements.controls.classList.add('hidden');
+        this.hideChapterSelect();
         this.hideVerseControls();
     }
 
@@ -456,22 +458,33 @@ class BibleApp {
 
     displayVerses() {
         const bookAbbreviation = this.elements.bookSelect.value;
+        const chapterNumber = parseInt(this.elements.chapterSelect?.value);
+        
         if (!bookAbbreviation) {
             this.showError('Please select a book first.');
             return;
         }
 
-        const book = this.findBookByAbbrev(bookAbbreviation);
-        if (!book || !book.chapters || !book.chapters[0]) {
-            this.showError('Book data not found.');
+        if (!chapterNumber) {
+            this.showError('Please select a chapter first.');
             return;
         }
 
-        const startVerse = parseInt(this.elements.startVerse.value) || null;
-        const endVerse = parseInt(this.elements.endVerse.value) || null;
+        const book = this.findBookByAbbrev(bookAbbreviation);
+        if (!book || !book.chapters || !book.chapters[chapterNumber - 1]) {
+            this.showError('Chapter data not found.');
+            return;
+        }
+
+        const startVerse = parseInt(this.elements.startVerse.value) || 1;
+        let endVerse = parseInt(this.elements.endVerse.value);
         
-        // Get verses from first chapter (assuming single chapter for now)
-        const chapterVerses = book.chapters[0];
+        // If no end verse specified, use end of chapter
+        if (!endVerse) {
+            endVerse = book.chapters[chapterNumber - 1].length;
+        }
+        
+        const chapterVerses = book.chapters[chapterNumber - 1];
         const verses = this.getVerseRange(chapterVerses, startVerse, endVerse);
         
         if (verses.length === 0) {
@@ -479,49 +492,27 @@ class BibleApp {
             return;
         }
 
-        this.renderVerses(bookAbbreviation, verses, startVerse, endVerse);
+        this.renderVerses(book.name, chapterNumber, verses, startVerse, endVerse);
         this.showReading();
     }
 
     getVerseRange(chapterVerses, start, end) {
-        // Convert verse text array to verse objects with numbers
         const allVerses = chapterVerses.map((text, index) => ({
             verse: index + 1,
             text: text
         }));
 
-        // No start, no end: show all
-        if (!start && !end) {
-            return allVerses;
-        }
-        
-        // Start only: show just that verse
-        if (start && !end) {
-            return allVerses.filter(v => v.verse === start);
-        }
-        
-        // End only: show from beginning to end
-        if (!start && end) {
-            return allVerses.filter(v => v.verse <= end);
-        }
-        
-        // Both start and end: show range
         return allVerses.filter(v => v.verse >= start && v.verse <= end);
     }
 
-    renderVerses(bookAbbreviation, verses, startVerse, endVerse) {
-        // Set title using display name
-        let title = this.getBookDisplayName(bookAbbreviation);
+    renderVerses(bookName, chapterNumber, verses, startVerse, endVerse) {
+        // Set title
+        let title = `${bookName} ${chapterNumber}`;
         
-        // For now, assume chapter 1 (you can extend this for multi-chapter support)
-        title += ' 1';
-        
-        if (startVerse && endVerse && startVerse !== endVerse) {
-            title += `:${startVerse}-${endVerse}`;
-        } else if (startVerse) {
+        if (startVerse === endVerse) {
             title += `:${startVerse}`;
-        } else if (endVerse) {
-            title += `:1-${endVerse}`;
+        } else if (startVerse !== 1 || endVerse !== verses.length + startVerse - 1) {
+            title += `:${startVerse}-${endVerse}`;
         }
         
         this.elements.chapterTitle.textContent = title;
@@ -546,15 +537,12 @@ class BibleApp {
         const nextIndex = (currentIndex + 1) % this.fontSizes.length;
         this.currentFontSize = this.fontSizes[nextIndex];
         
-        // Update verses display if visible
         if (!this.elements.reading.classList.contains('hidden')) {
             this.elements.verses.className = `font-${this.currentFontSize}`;
         }
         
-        // Save preference
         localStorage.setItem('bibleFontSize', this.currentFontSize);
         
-        // Update button text
         const sizeLabels = { small: 'Aa', medium: 'Aa', large: 'AA', xlarge: 'AA' };
         this.elements.fontBtn.textContent = sizeLabels[this.currentFontSize];
     }
